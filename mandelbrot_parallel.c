@@ -6,15 +6,17 @@
 #define LARGURA 800
 #define ALTURA 800
 #define MAX_ITER 256
-#define NUM_THREADS 8
+#define NUM_THREADS 2
 
 SDL_Renderer *renderer;
-double xmin = -2.0, xmax = 1.0, ymin = -1.5, ymax = 1.5;
+SDL_mutex *sdl_mutex;
+
+double xmin = -2.0, xmax = 1.0;
+double ymin = -1.5, ymax = 1.5;
 
 typedef struct {
-    int thread_id;
-    int y_inicio;
-    int y_fim;
+    int x_inicio, x_fim;
+    int y_inicio, y_fim;
 } ThreadData;
 
 int mandelbrot(double real, double imag) {
@@ -33,14 +35,19 @@ void* render_fractal(void *arg) {
     ThreadData *data = (ThreadData*) arg;
 
     for (int y = data->y_inicio; y < data->y_fim; y++) {
-        for (int x = 0; x < LARGURA; x++) {
+        for (int x = data->x_inicio; x < data->x_fim; x++) {
             double real = xmin + (xmax - xmin) * x / LARGURA;
             double imag = ymin + (ymax - ymin) * y / ALTURA;
             int iter = mandelbrot(real, imag);
             int cor = iter % 256;
 
+            // TODO: remove render from here
+            // TODO: write on result buffer
+            // Lock para evitar conflitos entre threads no renderizador
+            SDL_LockMutex(sdl_mutex);
             SDL_SetRenderDrawColor(renderer, cor, cor, cor, 255);
             SDL_RenderDrawPoint(renderer, x, y);
+            SDL_UnlockMutex(sdl_mutex);
         }
     }
     return NULL;
@@ -48,28 +55,42 @@ void* render_fractal(void *arg) {
 
 int main() {
     SDL_Init(SDL_INIT_VIDEO);
-    SDL_Window *window = SDL_CreateWindow("Mandelbrot Paralelo", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, LARGURA, ALTURA, SDL_WINDOW_SHOWN);
+    SDL_Window *window = SDL_CreateWindow("Mandelbrot Paralelo (Blocos)", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, LARGURA, ALTURA, SDL_WINDOW_SHOWN);
     renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+    sdl_mutex = SDL_CreateMutex();
 
     pthread_t threads[NUM_THREADS];
     ThreadData thread_data[NUM_THREADS];
 
-    int linhas_por_thread = ALTURA / NUM_THREADS;
+    // Determina o número de blocos em cada eixo
+    int blocos_x = 2;
+    int blocos_y = NUM_THREADS / blocos_x;
+    int largura_bloco = LARGURA / blocos_x;
+    int altura_bloco = ALTURA / blocos_y;
 
-    for (int i = 0; i < NUM_THREADS; i++) {
-        thread_data[i].thread_id = i;
-        thread_data[i].y_inicio = i * linhas_por_thread;
-        thread_data[i].y_fim = (i == NUM_THREADS - 1) ? ALTURA : (i + 1) * linhas_por_thread;
-        pthread_create(&threads[i], NULL, render_fractal, &thread_data[i]);
+    int thread_id = 0;
+    for (int by = 0; by < blocos_y; by++) {
+        for (int bx = 0; bx < blocos_x; bx++) {
+            thread_data[thread_id].x_inicio = bx * largura_bloco;
+            thread_data[thread_id].x_fim = (bx == blocos_x - 1) ? LARGURA : (bx + 1) * largura_bloco;
+            thread_data[thread_id].y_inicio = by * altura_bloco;
+            thread_data[thread_id].y_fim = (by == blocos_y - 1) ? ALTURA : (by + 1) * altura_bloco;
+            pthread_create(&threads[thread_id], NULL, render_fractal, &thread_data[thread_id]);
+            thread_id++;
+        }
     }
 
+    // TODO: add while (cond_mutex) to read from result buffer
+    // TODO: create thread to render
     for (int i = 0; i < NUM_THREADS; i++) {
         pthread_join(threads[i], NULL);
     }
 
-    SDL_RenderPresent(renderer);
-    SDL_Delay(10000);
 
+    SDL_RenderPresent(renderer);
+    SDL_Delay(5000);
+
+    SDL_DestroyMutex(sdl_mutex);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     SDL_Quit();
