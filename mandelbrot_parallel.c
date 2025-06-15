@@ -8,16 +8,47 @@
 #define MAX_ITER 256
 #define NUM_THREADS 2
 
+// Define structures
+typedef struct {
+    int x_inicio, x_fim;
+    int y_inicio, y_fim;
+} ThreadData;
+
+typedef struct {
+    int x, y;
+    int color;
+} ItemToPrint;
+
+// Global variables
+
+
+/// Work Buffer
+ThreadData *buffer_work_to_be_done;
+int current_index_from_workers_buffer = 0;
+int last_index_from_workers_buffer = 0;
+pthread_mutex_t mutex_work_to_be_done;
+pthread_cond_t cond_work_to_be_done;
+
+/// Print buffer 
+ItemToPrint *colors_to_be_printed;
+int current_index_from_printer_buffer = 0;
+int last_index_from_printer_buffer = 0;
+pthread_mutex_t mutex_work_to_be_printed;
+pthread_cond_t cond_work_to_be_printed;
+
 SDL_Renderer *renderer;
 SDL_mutex *sdl_mutex;
 
 double xmin = -2.0, xmax = 1.0;
 double ymin = -1.5, ymax = 1.5;
 
-typedef struct {
-    int x_inicio, x_fim;
-    int y_inicio, y_fim;
-} ThreadData;
+bool has_data_to_be_proceeded() {
+    return last_index_from_workers_buffer > current_index_from_workers_buffer;
+}
+
+bool has_data_to_be_printed() {
+    return last_index_from_printer_buffer > current_index_from_printer_buffer;
+}
 
 int mandelbrot(double real, double imag) {
     double z_real = 0.0, z_imag = 0.0;
@@ -29,6 +60,69 @@ int mandelbrot(double real, double imag) {
         n++;
     }
     return n;
+}
+
+void* worker(void *arg) {
+    while (true) {
+        pthread_mutex_lock(&mutex_work_to_be_done);
+
+        while (!has_data_to_be_proceeded()) {
+            pthread_cond_wait(&cond_work_to_be_done, &mutex_work_to_be_done);
+        }
+
+        int index_to_consider = current_index_from_workers_buffer;
+        current_index_from_workers_buffer++;
+
+        pthread_mutex_unlock(&mutex_work_to_be_done);
+
+        ThreadData data_to_procced = buffer_work_to_be_done[index_to_consider];
+        ItemToPrint item_to_print;
+
+        for (int y = data->y_inicio; y < data->y_fim; y++) {
+            for (int x = data->x_inicio; x < data->x_fim; x++) {
+                double real = xmin + (xmax - xmin) * x / LARGURA;
+                double imag = ymin + (ymax - ymin) * y / ALTURA;
+                int iter = mandelbrot(real, imag);
+                int color = iter % 256;
+
+                item_to_print.x = x;
+                item_to_print.y = y;
+                item_to_print.color = color;
+
+                // TODO: Adicionar em array temporário.
+            }
+        }
+
+        // TODO: Adicionar em buffer do to print
+        // - Buffer: colors_to_be_printed
+        // - Lidar com mutext mutex_work_to_be_printed
+        // - Fazer notify para printer cond_work_to_be_printed.
+        // - Fazer update do last_index_from_printer_buffer.
+        // pthread_cond_signal(&cond_work_to_be_printed);
+    }
+}
+
+void create_workers(int quantity_of_threads) {
+    for (int i = 0; i < quantity_of_threads; i++) {
+        pthread_create(i, NULL, worker, NULL);
+    }
+}
+
+void thread_print() {
+    while (true) {
+        pthread_mutex_lock(&mutex_work_to_be_printed);
+
+        while (!has_data_to_be_proceeded()) {
+            pthread_cond_wait(&cond_work_to_be_printed, &mutex_work_to_be_printed);
+        }
+
+        int index_to_consider = current_index_from_printer_buffer;
+        current_index_from_printer_buffer++;
+
+        pthread_mutex_unlock(&mutex_work_to_be_printed);
+
+        // TODO: Fazer as chamadas para printrar quadrado.
+    }
 }
 
 void* render_fractal(void *arg) {
