@@ -77,6 +77,9 @@ void* worker(void *arg) {
 
         ThreadData data_to_procced = buffer_work_to_be_done[index_to_consider];
         ItemToPrint item_to_print;
+        int size_of_temp_array = 0 * 0; // TODO: Precisamos mudar quando tivermos o controle de quadrado.
+        int index_temp_array = 0;
+        ItemToPrint temp_array[size_of_temp_array];
 
         for (int y = data->y_inicio; y < data->y_fim; y++) {
             for (int x = data->x_inicio; x < data->x_fim; x++) {
@@ -89,16 +92,20 @@ void* worker(void *arg) {
                 item_to_print.y = y;
                 item_to_print.color = color;
 
-                // TODO: Adicionar em array temporário.
+                temp_array[index_temp_array] = item_to_print;
+                index_temp_array++;
             }
         }
 
-        // TODO: Adicionar em buffer do to print
-        // - Buffer: colors_to_be_printed
-        // - Lidar com mutext mutex_work_to_be_printed
-        // - Fazer notify para printer cond_work_to_be_printed.
-        // - Fazer update do last_index_from_printer_buffer.
-        // pthread_cond_signal(&cond_work_to_be_printed);
+        pthread_mutex_lock(&mutex_work_to_be_printed);
+
+        for (int i = 0; i < size_of_temp_array; i++) {
+            last_index_from_printer_buffer++;
+            colors_to_be_printed[last_index_from_printer_buffer] = temp_array[index_temp_array];
+        }
+
+        pthread_mutex_unlock(&mutex_work_to_be_printed);
+        pthread_cond_signal(&cond_work_to_be_printed);
     }
 }
 
