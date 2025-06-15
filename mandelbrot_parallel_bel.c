@@ -75,7 +75,9 @@ int mandelbrot(double real, double imag) {
 }
 
 void* printer(void* arg) {
-  while (has_data_to_be_printed()) {
+  while (!printer_done) {
+    int start_index, end_index;
+
     pthread_mutex_lock(&mutex_work_to_be_printed);
 
     while (!has_data_to_be_printed() && !printer_done) {
@@ -84,29 +86,39 @@ void* printer(void* arg) {
 
     if (printer_done) {
       pthread_mutex_unlock(&mutex_work_to_be_printed);
-      break; // Exit loop and end thread
+      break;
     }
 
-    for (int i = current_index_from_printer_buffer; i < last_index_from_printer_buffer; i++) {
+    start_index = current_index_from_printer_buffer;
+    end_index = last_index_from_printer_buffer;
+
+    printf("Desenhando de %d até %d\n", start_index, end_index);
+
+    current_index_from_printer_buffer = end_index;
+
+    pthread_mutex_unlock(&mutex_work_to_be_printed);
+
+    for (int i = start_index; i < end_index; i++) {
       ItemToPrint item = colors_to_be_printed[i];
       SDL_SetRenderDrawColor(renderer, item.color, item.color, item.color, 255);
       SDL_RenderDrawPoint(renderer, item.x, item.y);
     }
-    current_index_from_printer_buffer = last_index_from_printer_buffer;
+
+    SDL_RenderPresent(renderer);
     
     pthread_mutex_lock(&mutex_blocks_processed);
-    if (current_index_from_printer_buffer == (total_blocks - 1)) {
-      printer_done = true;
+    if (workers_done && !has_data_to_be_printed()) {
+        printer_done = true;
     }
     pthread_mutex_unlock(&mutex_blocks_processed);
 
-    pthread_mutex_unlock(&mutex_work_to_be_printed);
+    pthread_cond_signal(&cond_work_to_be_printed);
   }
 }
 
 void* producer(void* arg) {
   ThreadData *thread_data = (ThreadData *) arg;
-  while(has_data_to_process()) {
+  while(!workers_done) {
     pthread_mutex_lock(&mutex_work_to_be_done);
 
     while (!has_data_to_process() && !workers_done) {
@@ -119,6 +131,7 @@ void* producer(void* arg) {
     }
 
     Block data_to_process = buffer_work_to_be_done[current_index_from_workers_buffer];
+    current_index_from_workers_buffer++;
     ItemToPrint item_to_print;
     int size_of_temp_array = block_size * block_size; // TODO: Precisamos mudar quando tivermos o controle de quadrado.
     int index_temp_array = 0;
@@ -130,6 +143,8 @@ void* producer(void* arg) {
         double imag = ymin + (ymax - ymin) * y / HEIGHT;
         int iter = mandelbrot(real, imag);
         int color = iter % 256;
+
+        printf("PROCESSANDO: COR: %d | X: %d Y: %d\n", color, x, y);
         
         item_to_print.x = x;
         item_to_print.y = y;
@@ -137,13 +152,13 @@ void* producer(void* arg) {
         
         temp_array[index_temp_array] = item_to_print;
         index_temp_array++;
-        current_index_from_workers_buffer++;
       }
     }
 
     pthread_mutex_lock(&mutex_blocks_processed);
-    if (current_index_from_workers_buffer == (total_blocks - 1)) {
-      workers_done = true;
+    blocks_processed++;
+    if (blocks_processed == total_blocks) {
+        workers_done = true;
     }
     pthread_mutex_unlock(&mutex_blocks_processed);
 
@@ -165,6 +180,9 @@ int main(int argc, char *argv[]) {
   SDL_Init(SDL_INIT_VIDEO);
   SDL_Window *window = SDL_CreateWindow("Mandelbrot Paralelo (Blocos)", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WIDTH, HEIGHT, SDL_WINDOW_SHOWN);
   renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+  SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+  SDL_RenderClear(renderer);
+  SDL_RenderPresent(renderer);
 
   pthread_mutex_init(&mutex_work_to_be_done, NULL);
   pthread_cond_init(&cond_work_to_be_done, NULL);
@@ -182,7 +200,7 @@ int main(int argc, char *argv[]) {
   int blocks_x = (WIDTH + block_size - 1) / block_size;
   int blocks_y = (HEIGHT + block_size - 1) / block_size;
   total_blocks = blocks_x * blocks_y;
-  last_index_from_workers_buffer = total_blocks - 1;
+  last_index_from_workers_buffer = total_blocks;
   buffer_work_to_be_done = malloc(total_blocks * sizeof(Block));
   colors_to_be_printed = malloc(WIDTH * HEIGHT * sizeof(ItemToPrint));
 
@@ -228,7 +246,6 @@ int main(int argc, char *argv[]) {
   free(buffer_work_to_be_done);
   free(colors_to_be_printed);
 
-  SDL_RenderPresent(renderer);
   SDL_Delay(5000);
 
   SDL_DestroyRenderer(renderer);
