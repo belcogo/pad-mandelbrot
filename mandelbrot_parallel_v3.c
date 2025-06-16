@@ -46,12 +46,6 @@ int block_size;
 int total_blocks;
 int max_iter;
 
-bool workers_done = false;
-bool printer_done = false;
-
-bool running = true;
-SDL_Event event;
-
 bool has_data_to_process() {
   return last_index_from_workers_buffer > current_index_from_workers_buffer;
 }
@@ -121,7 +115,12 @@ void* producer(void* arg) {
 
 void* create_work_to_be_done(void* arg) {
   int block_id = 0;
-  int block_size = (int) arg;
+  int block_size = (int)(intptr_t) arg;
+
+  printf("O block_size é: %d\n", block_size);
+
+  int blocks_x = (WIDTH + block_size - 1) / block_size;
+  int blocks_y = (HEIGHT + block_size - 1) / block_size;
 
   for (int by = 0; by < blocks_y; by++) {
     for (int bx = 0; bx < blocks_x; bx++) {
@@ -130,7 +129,10 @@ void* create_work_to_be_done(void* arg) {
       buffer_work_to_be_done[block_id].x_fim = ((bx + 1) * block_size > WIDTH) ? WIDTH : (bx + 1) * block_size;
       buffer_work_to_be_done[block_id].y_inicio = by * block_size;
       buffer_work_to_be_done[block_id].y_fim = ((by + 1) * block_size > HEIGHT) ? HEIGHT : (by + 1) * block_size;
+      
       block_id++;
+      last_index_from_workers_buffer++;
+
       pthread_mutex_unlock(&mutex_work_to_be_done);
       pthread_cond_signal(&cond_work_to_be_done);
     }
@@ -161,24 +163,21 @@ int main(int argc, char *argv[]) {
   int blocks_x = (WIDTH + block_size - 1) / block_size;
   int blocks_y = (HEIGHT + block_size - 1) / block_size;
   total_blocks = blocks_x * blocks_y;
-  last_index_from_workers_buffer = total_blocks;
+
   buffer_work_to_be_done = malloc(total_blocks * sizeof(Block));
   colors_to_be_printed = malloc(WIDTH * HEIGHT * sizeof(ItemToPrint));
 
+  // Definição de trabalhos a serem executados.
+  pthread_t creation_work_thread;
+  pthread_create(&creation_work_thread, NULL, create_work_to_be_done, (void*)(intptr_t) block_size);
+
   // Criação das threads dos publishers
   pthread_t *threads = malloc(NUM_THREADS * sizeof(pthread_t));
-
-  int blocks_per_thread = total_blocks / NUM_THREADS;
-  int remainder = total_blocks % NUM_THREADS;
-  int start = 0;
 
   for (int i = 0; i < NUM_THREADS; i++) {
     pthread_create(&threads[i], NULL, producer, NULL);
   }
   
-  // Definição de trabalhos a serem executados.
-  pthread_t creation_work_thread;
-  pthread_create(&creation_work_thread, NULL, create_work_to_be_done, (void*) block_size);
   
   // Função para manter window executando e printar coisas na tela.
   while (true) {
@@ -204,7 +203,6 @@ int main(int argc, char *argv[]) {
     SDL_Delay(16); // ~60fps
   }
 
-  free(thread_data);
   free(threads);
   free(buffer_work_to_be_done);
   free(colors_to_be_printed);
