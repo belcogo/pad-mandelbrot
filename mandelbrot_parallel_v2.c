@@ -6,7 +6,6 @@
 
 #define WIDTH 800
 #define HEIGHT 800
-#define MAX_ITER 256
 
 // Define structures
 typedef struct {
@@ -50,9 +49,13 @@ double ymin = -1.5, ymax = 1.5;
 
 int block_size;
 int total_blocks;
+int max_iter;
 
 bool workers_done = false;
 bool printer_done = false;
+
+bool running = true;
+SDL_Event event;
 
 bool has_data_to_process() {
   return last_index_from_workers_buffer > current_index_from_workers_buffer;
@@ -65,7 +68,7 @@ bool has_data_to_be_printed() {
 int mandelbrot(double real, double imag) {
   double z_real = 0.0, z_imag = 0.0;
   int n = 0;
-  while (z_real * z_real + z_imag * z_imag <= 4.0 && n < MAX_ITER) {
+  while (z_real * z_real + z_imag * z_imag <= 4.0 && n < max_iter) {
     double temp_real = z_real * z_real - z_imag * z_imag + real;
     z_imag = 2.0 * z_real * z_imag + imag;
     z_real = temp_real;
@@ -89,26 +92,33 @@ void* printer(void* arg) {
       break;
     }
 
+    // Define intervalo dos itens novos no buffer
     start_index = current_index_from_printer_buffer;
     end_index = last_index_from_printer_buffer;
 
-    printf("Desenhando de %d até %d\n", start_index, end_index);
-
-    current_index_from_printer_buffer = end_index;
-
+    // Apenas avança o ponteiro de leitura — a main vai consumir esses itens
     pthread_mutex_unlock(&mutex_work_to_be_printed);
 
-    for (int i = start_index; i < end_index; i++) {
-      ItemToPrint item = colors_to_be_printed[i];
-      SDL_SetRenderDrawColor(renderer, item.color, item.color, item.color, 255);
-      SDL_RenderDrawPoint(renderer, item.x, item.y);
-    }
+    // Envia um evento para a thread principal renderizar
+    SDL_Event event;
+    event.type = SDL_USEREVENT;
+    event.user.code = 0;  // pode usar isso se quiser distinguir tipos de eventos
+    event.user.data1 = NULL;
+    event.user.data2 = NULL;
+    SDL_PushEvent(&event);
 
-    SDL_RenderPresent(renderer);
-    
+    // Verifica se o trabalho acabou
     pthread_mutex_lock(&mutex_blocks_processed);
     if (workers_done && !has_data_to_be_printed()) {
         printer_done = true;
+
+        // Envia um último evento para garantir que a main acorde e finalize
+        SDL_Event final_event;
+        final_event.type = SDL_USEREVENT;
+        final_event.user.code = 1;
+        final_event.user.data1 = NULL;
+        final_event.user.data2 = NULL;
+        SDL_PushEvent(&final_event);
     }
     pthread_mutex_unlock(&mutex_blocks_processed);
 
@@ -143,8 +153,6 @@ void* producer(void* arg) {
         double imag = ymin + (ymax - ymin) * y / HEIGHT;
         int iter = mandelbrot(real, imag);
         int color = iter % 256;
-
-        printf("PROCESSANDO: COR: %d | X: %d Y: %d\n", color, x, y);
         
         item_to_print.x = x;
         item_to_print.y = y;
@@ -195,6 +203,7 @@ int main(int argc, char *argv[]) {
 
   int NUM_THREADS = atoi(argv[1]);
   block_size = atoi(argv[2]);
+  max_iter = atoi(argv[3]);
 
   // Determina o número de blocos em cada eixo
   int blocks_x = (WIDTH + block_size - 1) / block_size;
@@ -234,6 +243,37 @@ int main(int argc, char *argv[]) {
   pthread_t print_thread;
   pthread_create(&print_thread, NULL, printer, NULL);
 
+  while (running) {
+    while (SDL_PollEvent(&event)) {
+        if (event.type == SDL_QUIT) {
+            running = false;
+            break;
+        } else if (event.type == SDL_USEREVENT) {
+          if (event.user.code == 1) {
+              running = false;  // Finaliza quando o trabalho todo acabar
+              break;
+          }
+      }
+    }
+
+    pthread_mutex_lock(&mutex_work_to_be_printed);
+
+    while (current_index_from_printer_buffer < last_index_from_printer_buffer) {
+        ItemToPrint item = colors_to_be_printed[current_index_from_printer_buffer++];
+        // int color = item.color % 256;
+        int r = (item.color * 5) % 256;
+        int g = (item.color * 7) % 256;
+        int b = (item.color * 11) % 256;
+        SDL_SetRenderDrawColor(renderer, r, g, b, 255);
+        SDL_RenderDrawPoint(renderer, item.x, item.y);
+    }
+
+    pthread_mutex_unlock(&mutex_work_to_be_printed);
+
+    SDL_RenderPresent(renderer);
+    SDL_Delay(16); // ~60fps
+}
+
   for (int i = 0; i < NUM_THREADS; i++) {
       pthread_join(threads[i], NULL);
   }
@@ -246,7 +286,7 @@ int main(int argc, char *argv[]) {
   free(buffer_work_to_be_done);
   free(colors_to_be_printed);
 
-  SDL_Delay(5000);
+  // SDL_Delay(5000);
 
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);
