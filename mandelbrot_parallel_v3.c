@@ -123,9 +123,6 @@ void* producer(void* arg) {
 void* create_work_to_be_done(void* arg) {
   int block_id = 0;
   int block_size = (int)(intptr_t) arg;
-
-  printf("[Thread-Inicialização] - Criando os trabalhos.\n");
-
   int blocks_x = (WIDTH + block_size - 1) / block_size;
   int blocks_y = (HEIGHT + block_size - 1) / block_size;
 
@@ -145,7 +142,6 @@ void* create_work_to_be_done(void* arg) {
     }
   }
 
-  printf("[Thread-Inicialização] - Todos trabalhos adicionados.\n");
   pthread_exit(NULL);
 }
 
@@ -235,7 +231,7 @@ int main(int argc, char *argv[]) {
 
   clock_t fim = clock();
   double tempo = (double)(fim - inicio) / CLOCKS_PER_SEC;
-  printf("Tempo total de CPU: %.3f segundos\n", tempo);
+  printf("Tempo total para finalizar computação e apresentação: %.3f segundos\n", tempo);
 
   // Espero 15 segundos.
   sleep(15);
