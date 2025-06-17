@@ -165,6 +165,8 @@ int main(int argc, char *argv[]) {
   block_size = atoi(argv[2]);
   max_iter = atoi(argv[3]);
 
+  printf("Executando considerando: \n- Threads: %d \n- Block Size: %d\n- Max Inter: %d \n", NUM_THREADS, block_size, max_iter);
+
   // Determina o número de blocos em cada eixo
   int blocks_x = (WIDTH + block_size - 1) / block_size;
   int blocks_y = (HEIGHT + block_size - 1) / block_size;
