@@ -1,4 +1,6 @@
 #include <pthread.h>
+#include <unistd.h>
+#include <time.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -32,10 +34,6 @@ int last_index_from_printer_buffer = 0;
 pthread_mutex_t mutex_work_to_be_printed;
 pthread_cond_t cond_work_to_be_printed;
 
-// Processed blocks
-int blocks_processed = 0;
-pthread_mutex_t mutex_blocks_processed;
-
 // Global variables
 SDL_Renderer *renderer;
 
@@ -45,6 +43,7 @@ double ymin = -1.5, ymax = 1.5;
 int block_size;
 int total_blocks;
 int max_iter;
+bool application_finished = false;
 
 bool has_data_to_process() {
   return last_index_from_workers_buffer > current_index_from_workers_buffer;
@@ -52,6 +51,10 @@ bool has_data_to_process() {
 
 bool has_data_to_be_printed() {
   return last_index_from_printer_buffer > current_index_from_printer_buffer;
+}
+
+bool has_printed_everything() {
+  return (WIDTH * HEIGHT) == current_index_from_printer_buffer;
 }
 
 int mandelbrot(double real, double imag) {
@@ -72,6 +75,10 @@ void* producer(void* arg) {
 
     while (!has_data_to_process()) {
       pthread_cond_wait(&cond_work_to_be_done, &mutex_work_to_be_done);
+
+      if (application_finished) {
+        pthread_exit(NULL);
+      }
     }
 
     int index_to_process = current_index_from_workers_buffer;
@@ -81,7 +88,7 @@ void* producer(void* arg) {
 
     Block data_to_process = buffer_work_to_be_done[index_to_process];
     ItemToPrint item_to_print;
-    int size_of_temp_array = block_size * block_size; // TODO: Precisamos mudar quando tivermos o controle de quadrado.
+    int size_of_temp_array = block_size * block_size;
     int index_temp_array = 0;
     ItemToPrint temp_array[size_of_temp_array];
 
@@ -117,7 +124,7 @@ void* create_work_to_be_done(void* arg) {
   int block_id = 0;
   int block_size = (int)(intptr_t) arg;
 
-  printf("O block_size é: %d\n", block_size);
+  printf("[Thread-Inicialização] - Criando os trabalhos.\n");
 
   int blocks_x = (WIDTH + block_size - 1) / block_size;
   int blocks_y = (HEIGHT + block_size - 1) / block_size;
@@ -137,9 +144,14 @@ void* create_work_to_be_done(void* arg) {
       pthread_cond_signal(&cond_work_to_be_done);
     }
   }
+
+  printf("[Thread-Inicialização] - Todos trabalhos adicionados.\n");
+  pthread_exit(NULL);
 }
 
 int main(int argc, char *argv[]) {
+  clock_t inicio = clock();
+
   SDL_Init(SDL_INIT_VIDEO);
   SDL_Window *window = SDL_CreateWindow("Mandelbrot Paralelo (Blocos)", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WIDTH, HEIGHT, SDL_WINDOW_SHOWN);
   renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
@@ -152,8 +164,6 @@ int main(int argc, char *argv[]) {
 
   pthread_mutex_init(&mutex_work_to_be_printed, NULL);
   pthread_cond_init(&cond_work_to_be_printed, NULL);
-
-  pthread_mutex_init(&mutex_blocks_processed, NULL);
 
   int NUM_THREADS = atoi(argv[1]);
   block_size = atoi(argv[2]);
@@ -180,33 +190,57 @@ int main(int argc, char *argv[]) {
   
   
   // Função para manter window executando e printar coisas na tela.
-  while (true) {
+  while (!application_finished) {
     pthread_mutex_lock(&mutex_work_to_be_printed);
 
     while (!has_data_to_be_printed()) {
       pthread_cond_wait(&cond_work_to_be_printed, &mutex_work_to_be_printed);
     }
 
-    while (current_index_from_printer_buffer < last_index_from_printer_buffer) {
-        ItemToPrint item = colors_to_be_printed[current_index_from_printer_buffer++];
+    while (current_index_from_printer_buffer <= last_index_from_printer_buffer) {
+        ItemToPrint item = colors_to_be_printed[current_index_from_printer_buffer];
         // int color = item.color % 256;
         int r = (item.color * 5) % 256;
         int g = (item.color * 7) % 256;
         int b = (item.color * 11) % 256;
         SDL_SetRenderDrawColor(renderer, r, g, b, 255);
         SDL_RenderDrawPoint(renderer, item.x, item.y);
+
+        application_finished = has_printed_everything();
+        current_index_from_printer_buffer++;
     }
 
     pthread_mutex_unlock(&mutex_work_to_be_printed);
 
     SDL_RenderPresent(renderer);
     SDL_Delay(16); // ~60fps
+
+    if (application_finished) {
+      break;
+    }
   }
 
   free(threads);
   free(buffer_work_to_be_done);
   free(colors_to_be_printed);
-  
+
+  // Destroí variável condicional e mutex do printer.
+  pthread_cond_destroy(&cond_work_to_be_printed);
+  pthread_mutex_destroy(&mutex_work_to_be_printed);
+
+  // Destroí variável condicional e mutex do producer.
+  pthread_cond_broadcast(&cond_work_to_be_done);
+  pthread_cond_destroy(&cond_work_to_be_done);
+  pthread_mutex_destroy(&mutex_work_to_be_done);
+
+  clock_t fim = clock();
+  double tempo = (double)(fim - inicio) / CLOCKS_PER_SEC;
+  printf("Tempo total de CPU: %.3f segundos\n", tempo);
+
+  // Espero 15 segundos.
+  sleep(15);
+    
+  // Finalizo a window.
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);
   SDL_Quit();
