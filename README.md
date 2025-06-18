@@ -37,13 +37,6 @@ Nomes: Bel Cogo e Bruno da Siqueira Hoffmann
 
 - Cenário 3:
 
-| Inter | Threads** | Quadrados | Tempo    |
-|-------|-----------|-----------|----------|
-| 65536 | 1         | 10        | 39.340s  |
-| 65536 | 2         | 10        | 39.715s  |
-| 65536 | 3         | 10        | 45.988s  |
-| 65536 | 5         | 10        | 54.268s  |
-
 | Inter | Threads**   | Tempo   | Quadrados |
 |-------|-------------|---------|-----------|
 | 256   | Sequencial  | 24 mins |   10      |
