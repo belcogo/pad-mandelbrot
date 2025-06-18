@@ -17,12 +17,16 @@ Nomes: Bel Cogo e Bruno da Siqueira Hoffmann
 
 - Experimento feito em uma máquina de 16GB RAM, i5-1334U - 12 threads, Ubuntu 22.04;
 
+- Cenário 1:
+
 | Inter | Threads** | Quadrados | Tempo    |
 |-------|-----------|-----------|----------|
 | 65536 | 1         | 100       | 39.149s  |
 | 65536 | 2         | 100       | 39.312s  |
 | 65536 | 3         | 100       | 45.391s  |
 | 65536 | 5         | 100       | 52.109s  |
+
+- Cenário 2:
 
 | Inter | Threads** | Quadrados | Tempo    |
 |-------|-----------|-----------|----------|
@@ -31,5 +35,25 @@ Nomes: Bel Cogo e Bruno da Siqueira Hoffmann
 | 65536 | 3         | 10        | 45.988s  |
 | 65536 | 5         | 10        | 54.268s  |
 
+- Cenário 3:
+
+| Inter | Threads** | Quadrados | Tempo    |
+|-------|-----------|-----------|----------|
+| 65536 | 1         | 10        | 39.340s  |
+| 65536 | 2         | 10        | 39.715s  |
+| 65536 | 3         | 10        | 45.988s  |
+| 65536 | 5         | 10        | 54.268s  |
+
+| Inter | Threads**   | Tempo   | Quadrados |
+|-------|-------------|---------|-----------|
+| 256   | Sequencial  | 24 mins |   10      |
+| 256   | 1 thread    | 0,688s  |   10      |
+| 256   | 2 threads   | 0,721s  |   10      |
+| 256   | 5 threads   | 0,680s  |   10      |
+
 Notas:
 - Threads**: O número de threads do producer, ainda há o número de threads (main e orquestrador de trabalho);
+
+### Conclusões
+
+Inicialmente, houve uma grande redução do tempo de execução ao paralelizar o código, onde ele saiu da casa de minutos para a casa de segundos. Mas, com o aumento de threads foi observado um aumento no tempo, que após uma análise do código possivelmente pode estar associado com o modo que está sendo feito a adição dos quadros para imprimir dentro do buffer, onde a thread de producer fica muito tempo com o mutex da sessão crítica, o que provavelmente gera mais threads esperando o seu momento de entrar na sessão crítica.
